@@ -1,0 +1,8 @@
+Материнский ПК
+git add .   -- добавить файлы или (Opt + Comm + A)
+git commit -m "aor_dec2509_mit_1"
+git push
+
+Принимающий ПК
+git fetch origin
+git reset --hard origin/main
