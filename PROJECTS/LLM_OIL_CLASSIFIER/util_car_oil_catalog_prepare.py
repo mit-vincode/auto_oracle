@@ -85,6 +85,7 @@ def remove_trailing_model(text):
 def textReplace(df):
 
     df["vehicle"] = df["vehicle"].str.replace('годаОбъём', 'года. Объём')
+    df["vehicle"] = df["vehicle"].str.replace('Масла для ', '')
 
     return df
 

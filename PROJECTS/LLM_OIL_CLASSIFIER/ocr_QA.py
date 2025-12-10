@@ -156,7 +156,8 @@ def answerGenerate(query: str):
 
     t1 = U24.tNow()
     oil_and_fluids = ''
-    if 0 < len(param_df) <= MAX_len_param_df:
+    if  len(param_df) > 0:
+        param_df = param_df[:MAX_len_param_df]
         print(f"\n*** query_with_context -- > OIL_CLASSIFIER_PARAMS\n\n")
         query_with_context = query_2_Context(query, param_df, applied_filters, CarParam)
         oil_and_fluids = select_Oil_assortment(param_df)
