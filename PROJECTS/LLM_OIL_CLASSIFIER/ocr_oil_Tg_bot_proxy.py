@@ -26,6 +26,7 @@ from PROJECTS.LLM_OIL_CLASSIFIER.ocr_QA import answerGenerate
 
 
 TEST_mode = True
+external_ai = True #Open_Router
 
 # Загружаем переменные окружения
 load_dotenv(find_dotenv())
@@ -93,7 +94,7 @@ async def handle_question(message: Message):
 
     try:
         # Основная логика RAG
-        BOX = answerGenerate(question)
+        BOX = answerGenerate(question, external_ai)
         answer = BOX.answer
         answer = html.escape(answer)
 

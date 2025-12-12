@@ -190,6 +190,14 @@ class ParserFunction():
         element.click()
         return driver
 
+    def xpathFindText(self, driver, ss):
+        #поиск элемента по тексту
+        try:
+            return driver.find_element(By.XPATH, f"//*[contains(text(), '{ss}')]")
+        except Exception as e:
+            print(e)
+            return False
+
 
 
 

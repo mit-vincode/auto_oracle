@@ -15,6 +15,16 @@ import re
 from datetime import datetime
 from llama_cpp import Llama
 
+from openai import OpenAI
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv())
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+# Создаём клиент для OpenRouter
+client = OpenAI(
+    api_key=OPENROUTER_API_KEY,  # ← твой ключ от https://openrouter.ai/keys
+    base_url="https://openrouter.ai/api/v1"
+)
+
 
 model_dir = root_path + '/DATA_CATALOGS/llm_models/gguf/'
 
@@ -90,9 +100,30 @@ def get_max_tokens(param_df_len: int) -> int:
     return calculated_tokens if calculated_tokens < MAX_TOKENS else MAX_TOKENS
 
 def query_2_Context(client_query: str, param_df, applied_filters, CarParam) -> str:
+    def clean_context(text: str) -> str:
+        # Только безопасные очистки
+        text = re.sub(r'\n{3,}', '\n\n', text)  # убираем огромные отступы
+        text = re.sub(r'(\s*•\s*){2,}', ' • ', text)  # дубли •
+        text = re.sub(r'(?i)внимание.*?(\n\n|\Z)', '\n\n', text, flags=re.DOTALL)
+        text = re.sub(r'(?i)примечание.*?(\n\n|\Z)', '\n\n', text, flags=re.DOTALL)
+        return text.strip() + '\n\n'
+
+
 
     param_df =  param_df[:LIM_len_param_df]
-    all_A_text = f'\n=== ТИП ЖИДКОСТИ === '.join(param_df['A_text'].unique()) +' .'
+
+    raw_texts = param_df['A_text'].unique()
+    cleaned_texts = []
+    for text in raw_texts:
+        cleaned = clean_context(text)  # ← ваша функция
+        if cleaned.strip():  # на случай если после очистки пусто
+            cleaned_texts.append(cleaned)
+
+
+
+    all_A_text = '\n=== ТИП ЖИДКОСТИ === '.join(cleaned_texts) + ' .'
+
+    # all_A_text = f'\n=== ТИП ЖИДКОСТИ === '.join(param_df['A_text'].unique()) +' .'
     print(f"len param_df = {len(param_df)}, len all A_text = {len(all_A_text)}")
     query = "### КОНТЕКСТ\n<<<ВОПРОС КЛИЕНТА>>> " + client_query
     tail = query[-1]
@@ -122,13 +153,37 @@ class BoxResults():
 
 
 
-def answerGenerate(query: str):
+def aiApi(prompt, max_tokens):
+
+
+
+    response = client.chat.completions.create(
+        model="openai/gpt-4o-mini",  # или любая другая модель из списка ниже
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=max_tokens,
+                temperature=0.2, ###
+                stop=["<|im_end|>", "```"],
+    )
+
+
+    return response.choices[0].message.content
+
+def answerGenerate(query: str, external_ai = False):
     def generate_answer(query: str, param_df) -> dict:
         prompt = promtConstructor(query)
+        max_tokens=get_max_tokens(len(param_df))
+
+        if external_ai:
+            try:
+                return aiApi(prompt, max_tokens)
+
+            except Exception as e:
+                print(e)
+
 
         output = llm(
             prompt,
-            max_tokens=get_max_tokens(len(param_df)),
+            max_tokens=max_tokens,
             temperature=0.2, ###
             stop=["<|im_end|>", "```"],  # ["<|im_end|>", "```", "\n\n", "\n{"],
             echo=False,
@@ -137,6 +192,8 @@ def answerGenerate(query: str):
         answer = output["choices"][0]["text"]
 
         return answer
+
+
 
     BOX = BoxResults() #контейнер для результатов
 
@@ -153,11 +210,18 @@ def answerGenerate(query: str):
     param_dct = {param:getattr(CarParam, param) for param in CarParam.RESULT_ATTRIBUTES}
     param_df, applied_filters = filter_car_params(param_dct)
 
+    if len(param_df) > MAX_len_param_df:
+        BOX.answer = ("Алгоритм нашёл слишком много вариантов\n"
+                      "Попробуйте конкретизировать запрос, подробно опишите ваш автомобиль и необходимые товары\n"
+                      "Например: Chery Tiggo 7 pro 2020 масло моторное")
+
+        return BOX
+
+
 
     t1 = U24.tNow()
     oil_and_fluids = ''
     if  len(param_df) > 0:
-        param_df = param_df[:MAX_len_param_df]
         print(f"\n*** query_with_context -- > OIL_CLASSIFIER_PARAMS\n\n")
         query_with_context = query_2_Context(query, param_df, applied_filters, CarParam)
         oil_and_fluids = select_Oil_assortment(param_df)
@@ -224,9 +288,10 @@ def _strip_boilerplate(s: str) -> str:
 
 if __name__ == "__main__":
 
-    tests = ['как сварить кашу из топора?', 'джили монджаро 2023 масло моторное', 'opel astra h 1.6 масло моторное', 'bmw x5 2012 масло моторное','масло моторное для рено дастер ',
-              'Масло трансмиссионное CVT Chery Tiggo ', 'масло моторное Nisan Maxima 2013', 'Nissan X-Trail 2012 масло моторное и масло вариантора'
-             'масло моторное ford Transit 2013', "Audi Q7 2010 масло моторное и трансмисионное", 'жидкость для вариатора Toyota Corolla 2012',]
+    tests = ['джили монджаро 2023 масло моторное', 'opel astra h 1.6 масло моторное', 'bmw x5 2012 масло моторное',
+             'Масло трансмиссионное CVT Chery Tiggo ', 'масло моторное Nisan Maxima 2013', 'Nissan X-Trail 2012 масло моторное и масло вариантора',
+             'масло моторное ford Transit 2013', "Audi Q7 2010 масло моторное и трансмисионное", 'жидкость для вариатора Toyota Corolla 2012',
+             'солярис 2016 моторное масло']
 
 
 
@@ -242,7 +307,7 @@ if __name__ == "__main__":
     for i, query in enumerate(tests):
         query = _strip_boilerplate(query)
         print(f"\n\n{'=' * 60}{i}/{len(tests)}\nзапрос: {query}")
-        BOX = answerGenerate(query)
+        BOX = answerGenerate(query, external_ai=True)
         answer = BOX.answer
         delta_time_LLM = BOX.delta_time_LLM
 
