@@ -16,12 +16,24 @@ class ParserFunction():
 
         proxy_df = SQL.uploadSqlTab('proxy_base')
         self.proxy_list = list(proxy_df['proxy'].values)
+
+        proxy_mobile_df = SQL.uploadSqlTab('proxy_mobile')
+        self.proxy_mobile_list = list(proxy_mobile_df['proxy'].values)
+
         self.proxy_idx = 0
 
-    def getDriver(self, with_proxy=True):
+    def getDriver(self, with_proxy=True, mobile_proxy = False, mix_proxy = False):
+        print(f"mobile_proxy = {mobile_proxy}")
 
         if with_proxy:
-            my_proxy_list = self.proxy_list
+            if mix_proxy:
+                my_proxy_list = self.proxy_mobile_list + self.proxy_list
+
+            elif mobile_proxy:
+                my_proxy_list = self.proxy_mobile_list
+            else:
+                my_proxy_list = self.proxy_list
+
             proxy = my_proxy_list[self.proxy_idx]
             print(f"proxy = {proxy}, proxy_idx = {self.proxy_idx}")
 

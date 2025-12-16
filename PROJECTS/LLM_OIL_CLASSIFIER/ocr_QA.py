@@ -199,7 +199,7 @@ def answerGenerate(query: str, external_ai = False):
 
     CarParam.ssDecoder(query)
 
-    print(f"{query}, {getattr(CarParam, 'make'), getattr(CarParam, 'global_group')}")
+    print(f"{query}, {getattr(CarParam, 'make'), getattr(CarParam, 'car'), getattr(CarParam, 'global_group')}")
     if not getattr(CarParam, 'global_group') and not getattr(CarParam, 'make'):
         BOX.answer = ("Пожалуйста, укажите параметры автомобиля и искомый товар\n"
                       "Например: Chery Tiggo 7 pro 2020 масло моторное")
@@ -208,9 +208,12 @@ def answerGenerate(query: str, external_ai = False):
 
 
     param_dct = {param:getattr(CarParam, param) for param in CarParam.RESULT_ATTRIBUTES}
+
     param_df, applied_filters = filter_car_params(param_dct)
 
+
     if len(param_df) > MAX_len_param_df:
+        print(f"len(param_df) = {len(param_df)}")
         BOX.answer = ("Алгоритм нашёл слишком много вариантов\n"
                       "Попробуйте конкретизировать запрос, подробно опишите ваш автомобиль и необходимые товары\n"
                       "Например: Chery Tiggo 7 pro 2020 масло моторное")
@@ -288,7 +291,7 @@ def _strip_boilerplate(s: str) -> str:
 
 if __name__ == "__main__":
 
-    tests = ['джили монджаро 2023 масло моторное', 'opel astra h 1.6 масло моторное', 'bmw x5 2012 масло моторное',
+    tests = ['Citroen c-crosser 2011 год, 2,0 литра объем двигателя масло моторное', 'джили монджаро 2023 масло моторное', 'opel astra h 1.6 масло моторное', 'bmw x5 2012 масло моторное',
              'Масло трансмиссионное CVT Chery Tiggo ', 'масло моторное Nisan Maxima 2013', 'Nissan X-Trail 2012 масло моторное и масло вариантора',
              'масло моторное ford Transit 2013', "Audi Q7 2010 масло моторное и трансмисионное", 'жидкость для вариатора Toyota Corolla 2012',
              'солярис 2016 моторное масло']
@@ -307,7 +310,7 @@ if __name__ == "__main__":
     for i, query in enumerate(tests):
         query = _strip_boilerplate(query)
         print(f"\n\n{'=' * 60}{i}/{len(tests)}\nзапрос: {query}")
-        BOX = answerGenerate(query, external_ai=True)
+        BOX = answerGenerate(query, external_ai=False)
         answer = BOX.answer
         delta_time_LLM = BOX.delta_time_LLM
 
