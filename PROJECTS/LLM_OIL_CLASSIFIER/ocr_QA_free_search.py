@@ -101,6 +101,25 @@ def retrieve(query: str, k: int = 5):
 # ==============================================================================
 # 4. ГЕНЕРАЦИЯ ОТВЕТА
 # ==============================================================================
+def drop_auto_not_specified(text: str) -> str:
+    # Удаляет строку вида: "✨ для автомобиля - не указано" (и близкие варианты)
+    lines = text.splitlines()
+    out = []
+    for ln in lines:
+        ln_norm = re.sub(r"\s+", " ", ln.strip().lower())
+        # ловим: "для автомобиля" + любой плейсхолдер типа "не указано/нет данных/n/a/отсутствует"
+        if ("для автомобиля" in ln_norm and re.search(r"(не указано|нет данных|n/a|отсутств)", ln_norm)):
+            continue
+        # иногда модель пишет без "для автомобиля", но с таким же смыслом
+        if re.search(r"\bавтомобил(ь|я)\b", ln_norm) and re.search(r"(не указано|нет данных|n/a|отсутств)", ln_norm):
+            continue
+        out.append(ln)
+    # подчистим лишние пустые строки
+    cleaned = "\n".join(out)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
 def generate_Answer(question: str, llm):
     raw_contexts = retrieve(question, k=5)
     contexts = clean_rag_context(raw_contexts, question)[:5]
@@ -191,7 +210,7 @@ def generate_Answer(question: str, llm):
     if verified_links:
         answer_text += "\n\n**Рекомендуемые товары:**\n" + "\n".join(list(dict.fromkeys(verified_links))[:3])
 
-    return {"answer": answer_text}
+    return {"answer": drop_auto_not_specified(answer_text)}
 
 
 # ==============================================================================
