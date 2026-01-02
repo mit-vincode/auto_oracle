@@ -1,63 +1,146 @@
-# ocr_oil_Tg_bot.py
+# -*- coding: utf-8 -*-
+# ocr_oil_Tg_bot_proxy.py
 # Telegram-бот для RAG-системы по автохимии
 # aiogram 3.x + llama.cpp + FAISS + прокси для России
+#
+# FIX: Telegram server says - Bad Request: message is too long
+# -> отправляем ответ чанками (<= 4096 символов)
+
+import os
+import html
+import asyncio
+import logging
+import platform
+from typing import List
 
 import pandas as pd
-import os
-
-from bootstrap import *
-
-import logging, platform
-import asyncio
-from datetime import datetime
 
 from dotenv import load_dotenv, find_dotenv
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from aiogram.filters import Command
-import html
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# ← НОВОЕ: сессия с прокси
+# ← сессия с прокси
 from aiogram.client.session.aiohttp import AiohttpSession
 
+from bootstrap import *
 from PROJECTS.LLM_OIL_CLASSIFIER.ocr_QA import answerGenerate
 
 
+# ==========================
+# CONFIG
+# ==========================
 TEST_mode = True
-external_ai = True #Open_Router
+external_ai = True  # OpenRouter
 
-# Загружаем переменные окружения
+# Telegram limit for a single message is 4096 characters
+TG_LIMIT = 4096
+SAFE_LIMIT = 3500  # запас под HTML/entities и непредвиденные расширения текста
+
+
+# ==========================
+# ENV / TOKEN
+# ==========================
 load_dotenv(find_dotenv())
 
 if TEST_mode and (platform.system() == "Darwin"):
-    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN") #LavrGPT
+    BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # LavrGPT
     print(f"TEST_mode = {TEST_mode}")
 else:
-    BOT_TOKEN = os.getenv("TELEGRAM_MaxGPT_TOKEN") #@Auto_Oracle_Bot
+    BOT_TOKEN = os.getenv("TELEGRAM_MaxGPT_TOKEN")  # @Auto_Oracle_Bot
 
-# === НАСТРОЙКИ ПРОКСИ (РАБОЧИЙ В РОССИИ) ===
-PROXY_URL = "http://M3MRa2:Q1Pp2Y@177.234.136.58:8000"   # ← ваш проверенный прокси
 
-# Создаём сессию с прокси
+# ==========================
+# PROXY
+# ==========================
+PROXY_URL = "http://M3MRa2:Q1Pp2Y@177.234.136.58:8000"  # ваш прокси
 session = AiohttpSession(proxy=PROXY_URL)
 
-# Логирование
+
+# ==========================
+# LOGGING
+# ==========================
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 )
-
 logger = logging.getLogger("reinwell_ruseff_liquimoly")
 
-# Создаём бота с прокси-сессией
+
+# ==========================
+# BOT / DISPATCHER
+# ==========================
 default_properties = DefaultBotProperties(parse_mode=ParseMode.HTML)
 bot = Bot(token=BOT_TOKEN, session=session, default=default_properties)
-
 dp = Dispatcher()
 
 
+# ==========================
+# HELPERS: long message split
+# ==========================
+def split_text_safely(text: str, limit: int = SAFE_LIMIT) -> List[str]:
+    """
+    Режет текст на чанки, стараясь резать по \n\n, затем по \n, затем по пробелу.
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+
+    parts: List[str] = []
+    while len(text) > limit:
+        cut = text.rfind("\n\n", 0, limit)
+        if cut < int(limit * 0.5):
+            cut = text.rfind("\n", 0, limit)
+        if cut < int(limit * 0.5):
+            cut = text.rfind(" ", 0, limit)
+        if cut < int(limit * 0.5):
+            cut = limit  # fallback
+
+        chunk = text[:cut].strip()
+        if chunk:
+            parts.append(chunk)
+        text = text[cut:].strip()
+
+    if text:
+        parts.append(text)
+    return parts
+
+
+def close_unbalanced_b_tags(s: str) -> str:
+    """
+    Мини-страховка: если порезали и остался незакрытый <b>.
+    (У тебя форматирование по правилам — в основном <b>...</b>)
+    """
+    opens = s.count("<b>")
+    closes = s.count("</b>")
+    if opens > closes:
+        s += "</b>" * (opens - closes)
+    return s
+
+
+async def send_long_answer(message: Message, text: str) -> None:
+    """
+    Отправляет длинный текст несколькими сообщениями, чтобы не словить TG 'message is too long'.
+    """
+    chunks = split_text_safely(text, limit=SAFE_LIMIT)
+    for ch in chunks:
+        ch = close_unbalanced_b_tags(ch)
+
+        # Последняя страховка на случай неожиданного раздувания строки
+        if len(ch) > TG_LIMIT:
+            ch = ch[: TG_LIMIT - 10] + "…"
+
+        await message.answer(
+            ch,
+            disable_web_page_preview=True
+        )
+
+
+# ==========================
+# HANDLERS
+# ==========================
 @dp.message(Command("start", "help"))
 async def cmd_start(message: Message):
     await message.answer(
@@ -85,7 +168,7 @@ async def handle_question(message: Message):
 
     user_id = message.from_user.id
     username = message.from_user.username or "unknown"
-    stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     logger.info(f"[{stamp}] Вопрос от @{username} (id={user_id}): {question}")
 
@@ -93,31 +176,31 @@ async def handle_question(message: Message):
     typing_task = asyncio.create_task(send_typing(message))
 
     try:
-        # Основная логика RAG
         BOX = answerGenerate(question, external_ai)
-        answer = BOX.answer
-        answer = html.escape(answer)
+        answer = getattr(BOX, "answer", "") or ""
 
-        # Формируем красивый ответ
-        response = f"✨ {answer}\n\n"
+        # Экранируем под HTML-режим
+        answer_safe = html.escape(answer)
 
-        # Логируем в базу (обрезаем длинный ответ для БД)
+        # Формируем ответ
+        response = f"✨ {answer_safe}".strip()
+
+        # Логируем в базу (обрезаем для БД)
         SQL.stepDfInsert(
             name_sql_tab='auto_oracle_log',
             df=pd.DataFrame({
                 'username': [f"@{username}"],
                 'question': [question],
-                'answer': [answer[:175]], 'delta_time':[BOX.delta_time_LLM],
-                'search_type':[BOX.search_type]
+                'answer': [answer_safe[:750]],
+                'delta_time': [getattr(BOX, "delta_time_LLM", None)],
+                'search_type': [getattr(BOX, "search_type", None)]
             })
         )
 
         await typing_task  # дожидаемся завершения «печатает...»
 
-        await message.answer(
-            response,
-            disable_web_page_preview=True
-        )
+        # ВАЖНО: отправка чанками
+        await send_long_answer(message, response)
 
     except Exception as e:
         await typing_task
@@ -130,7 +213,7 @@ async def handle_question(message: Message):
 async def send_typing(message: Message):
     """Показывает индикатор «печатает…» пока генерируется ответ"""
     await bot.send_chat_action(message.chat.id, "typing")
-    await asyncio.sleep(5)  # увеличил до 5 сек — у вас генерация ~1 минута
+    await asyncio.sleep(5)
 
 
 async def main():

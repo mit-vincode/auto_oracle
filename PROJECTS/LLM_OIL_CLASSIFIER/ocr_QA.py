@@ -94,9 +94,9 @@ def promtConstructor(query: str) -> str:
 
 
 def get_max_tokens(param_df_len: int) -> int:
-    if param_df_len == 1: return 350
-    MAX_TOKENS = 1200
-    calculated_tokens = int(170 * param_df_len) + 150
+    if param_df_len == 1: return 450
+    MAX_TOKENS = 1600
+    calculated_tokens = int(170 * param_df_len) + 350
     return calculated_tokens if calculated_tokens < MAX_TOKENS else MAX_TOKENS
 
 
@@ -107,7 +107,10 @@ MAX_len_param_df = 25
 LIM_len_param_df = 6
 
 
-def query_2_Context(client_query: str, param_df, applied_filters, CarParam) -> str:
+
+
+
+def query_2_Context(client_query: str, param_df, applied_filters, CarParam, oil_and_fluids, PRODUCT_ANCHOR) -> str:
     def clean_context(text: str) -> str:
         text = re.sub(r'\n{3,}', '\n\n', text)
         text = re.sub(r'(\s*•\s*){2,}', ' • ', text)
@@ -129,6 +132,35 @@ def query_2_Context(client_query: str, param_df, applied_filters, CarParam) -> s
         lst_param = [f"{param}: {getattr(CarParam, param)}" for param in applied_filters]
         query += "\n<<<ПАРАМЕТРЫ ВОПРОСА>>> " + ", ".join(lst_param) + " <<</ПАРАМЕТРЫ ВОПРОСА>>>"
         query += "\n\n<<<ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ>>>\n=== ТИП ЖИДКОСТИ === " + all_A_text + " <<</ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ>>>"
+
+        ### ### конец <<<ВЫБОР ТОВАРОВ>>> ### ###
+        query += ("\n\n<<<ВЫБОР ТОВАРОВ>>>\n"
+                  "**КРИТИЧЕСКИ ВАЖНО:**\n: применяй только для моторных масел, трансмиссионных масел и спец-жидкостей.\n"
+                  "\n\n'---'\n\n")
+
+        query += ("### АЛГОРИТМ ФИЛЬТРАЦИИ И ПРИОРИТИЗАЦИИ ТОВАРОВ\n\n"
+                  "**МАКСИМАЛЬНЫЙ ПРИОРИТЕТ 1 - СПЕЦИФИКАЦИИ И ДОПУСКИ ПРОИЗВОДИТЕЛЯ (OEM) – если допуски OEM указаны выше.\n"
+                  "Для трансмиссий особо учитывай: ATF standards, Mercon, Dexron, GL (GL-4/GL-5/GL-5 LS) ZF TE-ML, ALLISON, Voith**\n"
+                  "**ПРИОРИТЕТ 2 - ACEA, если спецификация ACEA указана выше**\n"
+                  "**ПРИОРИТЕТ 3 - API, если спецификация API указана выше**\n"
+                  "**ПРИОРИТЕТ 4 - SAE, если спецификация SAE указана выше**\n"
+                  "**МИНИМАЛЬНЫЙ ПРИОРИТЕТ 5 - прочие допуски и спецификации, например: ILSAC, ISO, DOT**\n")
+
+        query += f"\n\n'---'\n\n### ДОСТУПНЫЕ для  ФИЛЬТРАЦИИ И ПРИОРИТИЗАЦИИ ТОВАРЫ\n\n{oil_and_fluids}"
+
+
+        query += (f"\n\n### Примени АЛГОРИТМ ФИЛЬТРАЦИИ И ПРИОРИТИЗАЦИИ к товарам, указанным выше.\n"
+                  f"Для каждого подходящего товара оцени соответствие: ИДЕАЛЬНОЕ / ВЫСОКОЕ / ПРИЕМЛЕМОЕ / НЕ ПОДХОДИТ.\n"
+                  f"**КРИТИЧЕСКИ ВАЖНО:**\n"
+                  f"1) Если найден хотя бы 1 подходящий товар, начни эту часть ответа (после вывода параметров автомобиля и спецификаций) маркера: {PRODUCT_ANCHOR}\n"
+                  f"1.1) Вставь пустую строку (двойной перенос)\n"
+                  f"2) Товары, получившие оценку 'НЕ ПОДХОДИТ', не выводи.\n"
+                  f"3) КАЖДУЮ строку товара копируй ДОСЛОВНО (verbatim) из списка ДОСТУПНЫЕ ТОВАРЫ — без сокращений и без изменений.\n"
+                  f"Используй ВСЁ название из списка ДОСТУПНЫЕ ТОВАРЫ выше, включая артикулы и спецификации\n"
+                  f"4) Отсортируй и список по убыванию соответствия требованиям, для каждой товарной категории, выведи не более 3 подходящих товара.\n"
+                  f"<<</ВЫБОР ТОВАРОВ>>>")
+
+        ### ### конец <<<ВЫБОР ТОВАРОВ>>> конец ### ###
 
     query += "\n\n**Задача:** Предоставьте лаконичный, структурированный ответ на запрос клиента:\n" + client_query
     return query
@@ -190,6 +222,7 @@ def answerGenerate(query: str, external_ai=False):
         )
         return output["choices"][0]["text"].strip()
 
+
     BOX = BoxResults()
     CarParam.ssDecoder(query)
 
@@ -200,6 +233,7 @@ def answerGenerate(query: str, external_ai=False):
 
     param_dct = {param: getattr(CarParam, param) for param in CarParam.RESULT_ATTRIBUTES}
     param_df, applied_filters = filter_car_params(param_dct)
+
 
     if len(param_df) > MAX_len_param_df:
         print(f"\n*** generate_Answer -- > LLM NEW FREE SEARCH")
@@ -213,11 +247,14 @@ def answerGenerate(query: str, external_ai=False):
     t1 = U24.tNow()
     oil_and_fluids = ''
     answer = ''
+    PRODUCT_ANCHOR = "___Подходящие товары:___"
 
     if len(param_df) > 0:
         print(f"\n*** query_with_context -- > OIL_CLASSIFIER_PARAMS")
-        query_with_context = query_2_Context(query, param_df, applied_filters, CarParam)
-        oil_and_fluids = select_Oil_assortment(param_df)
+        oil_and_fluids = select_Oil_assortment(param_df, limit_row=8)
+        query_with_context = query_2_Context(query, param_df, applied_filters, CarParam, oil_and_fluids, PRODUCT_ANCHOR)
+        print(query_with_context)
+
         answer = generate_answer(query_with_context, param_df)
         if answer:
             BOX.search_type = 'CLASSIFIER_PARAMS'
@@ -228,7 +265,7 @@ def answerGenerate(query: str, external_ai=False):
         answer = result["answer"]
         BOX.search_type = 'LLM_FREE_SEARCH'
 
-    if oil_and_fluids:
+    if oil_and_fluids and (not PRODUCT_ANCHOR in answer):
         answer += "\n\n" + oil_and_fluids
 
     BOX.delta_time_LLM = int((U24.tNow() - t1).total_seconds())
@@ -281,7 +318,7 @@ if __name__ == "__main__":
     #     'солярис 2016 моторное масло'
     # ]
 
-    tests = ["Volvo s60 2010 масло трансмиссионное",
+    tests = ["FOCUS II - седан - 2.0 - бензин 2012 масло моторное",
              "Подбери масло в ДВС лада гранта 2020, 1.6 л",
               "Changan Lamore подбери трансмиссию",
               "Масло в двигатель g4na",
